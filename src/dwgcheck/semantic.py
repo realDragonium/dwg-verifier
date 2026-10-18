@@ -39,6 +39,7 @@ class EnvironmentProblem(Exception):
 @dataclass(frozen=True)
 class Converter:
     command: tuple[str, ...]
+    env: dict[str, str] | None = None
 
 
 def _candidates(system: str) -> list[Path]:
@@ -78,7 +79,18 @@ def find_converter() -> Converter:
                 "so it can run under xvfb-run, or set DISPLAY."
             )
         return Converter((xvfb, "-a", exe))
+    if system == "Darwin" and _has_offscreen_plugin(Path(exe)):
+        return Converter((exe,), {**os.environ, "QT_QPA_PLATFORM": "offscreen"})
     return Converter((exe,))
+
+
+def _has_offscreen_plugin(exe: Path) -> bool:
+    # The stock macOS bundle ships only the Cocoa plugin, so the converter
+    # window opens for every file; with Qt's offscreen plugin added (see the
+    # README) it runs windowless. Forcing "offscreen" without the plugin
+    # makes the converter abort.
+    platforms = exe.resolve().parent.parent / "PlugIns" / "platforms"
+    return any(platforms.glob("libqoffscreen.*"))
 
 
 ODA = "ODA File Converter"
@@ -100,7 +112,9 @@ def check_file(path: Path, converter: Converter) -> list[Finding]:
         shutil.copyfile(path, in_dir / "input.dwg")
         args = [*converter.command, str(in_dir), str(out_dir), "ACAD2018", "DXF", "0", "1", "*.DWG"]
         try:
-            proc = subprocess.run(args, capture_output=True, text=True, timeout=CONVERT_TIMEOUT_S, check=False)
+            proc = subprocess.run(
+                args, capture_output=True, text=True, timeout=CONVERT_TIMEOUT_S, check=False, env=converter.env
+            )
         except subprocess.TimeoutExpired:
             return [_finding(ODA, "T2.oda.convert", f"did not finish within {CONVERT_TIMEOUT_S}s")]
         except OSError as exc:

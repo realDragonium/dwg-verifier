@@ -19,17 +19,16 @@ It does **not** mean "guaranteed to open in AutoCAD". Tier 1 does not interpret 
 Tier 2 (`--deep`) goes further by having the ODA File Converter read the whole drawing and auditing
 the result, but it is still an approximation of AutoCAD's behaviour (see [Known gaps](#known-gaps)).
 
-## Step-by-step: build and run
+## Step-by-step: macOS and Linux
+
+On Windows? Skip to [Step-by-step: Windows](#step-by-step-windows).
 
 ### 1. Install uv
 
 uv manages Python and the project's dependencies. If `uv --version` already works, skip this step.
 
 ```sh
-# macOS / Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 Open a new terminal afterwards so `uv` is on your `PATH`.
@@ -37,7 +36,7 @@ Open a new terminal afterwards so `uv` is on your `PATH`.
 ### 2. Get the code and install it
 
 ```sh
-git clone git@github.com:realDragonium/dwg-verifier.git
+git clone https://github.com/realDragonium/dwg-verifier.git
 cd dwg-verifier
 uv sync --extra deep     # creates .venv with Python 3.11+, dwgcheck, ezdxf and the test tools
 ```
@@ -55,7 +54,7 @@ uv run dwgcheck fixtures -r          # a whole directory tree
 ```
 
 To use plain `dwgcheck` instead of `uv run dwgcheck`, activate the project environment first:
-`source .venv/bin/activate` (Windows: `.venv\Scripts\activate`).
+`source .venv/bin/activate`.
 
 ### 4. Optional: install the ODA File Converter for `--deep`
 
@@ -66,7 +65,6 @@ Tier 2 needs the free ODA File Converter. Download it from
 |---|---|---|
 | macOS | Open the `.dmg` (arm64 for Apple Silicon, x64 for Intel) and drag `ODAFileConverter.app` into `/Applications`. | `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter` |
 | Linux | `sudo apt install ./ODAFileConverter_QT6_lnxX64_*.deb` (or the `.rpm`). On a machine without a display, also `sudo apt install xvfb`. | `ODAFileConverter` on `PATH`, `/usr/bin`, `/usr/local/bin` |
-| Windows | Run the `.msi`. | `C:\Program Files\ODA\ODAFileConverter*\ODAFileConverter.exe` |
 
 If it is installed elsewhere, point dwgcheck at the executable:
 
@@ -133,6 +131,139 @@ expects them to be valid.
 uv run python -m tools.detection_table --deep   # ~45 s with the headless converter
 uv run python -m tools.corruptions some.dwg out/  # write the corrupted variants to disk
 ```
+
+## Step-by-step: Windows
+
+Every command below goes into **PowerShell**: press the Windows key, type `PowerShell`, press
+Enter. Paste one block at a time. You don't need to install Python yourself; uv takes care of it.
+
+> These steps follow the documented Windows behaviour of uv, Git and the ODA File Converter and
+> dwgcheck's Windows code path, but they haven't been run on a Windows machine yet. If a step
+> doesn't do what it says, the [troubleshooting table](#windows-troubleshooting) covers the
+> likely causes.
+
+### 1. Install Git and uv
+
+```powershell
+winget install --id Git.Git -e
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+If Windows asks whether to allow changes, choose **Yes**. Then **close PowerShell and open a new
+one**, so it picks up the new commands, and check:
+
+```powershell
+git --version
+uv --version
+```
+
+Both should print a version number. (Already have Git? The first line just says it's installed.)
+
+### 2. Download dwgcheck and set it up
+
+```powershell
+cd $HOME
+git clone https://github.com/realDragonium/dwg-verifier.git
+cd dwg-verifier
+uv sync --extra deep
+```
+
+The last command downloads Python and everything dwgcheck needs into a `.venv` folder inside
+`dwg-verifier`. It takes a minute the first time, and nothing is installed system-wide.
+
+From now on, always run dwgcheck from inside this folder. In a new PowerShell window, go back with
+`cd $HOME\dwg-verifier`.
+
+### 3. Check that it works
+
+```powershell
+uv run dwgcheck fixtures -r
+```
+
+You should see a line for each sample drawing, all starting with `OK`, for example:
+
+```
+OK       fixtures\libredwg\2010\Arc.dwg (AC1024) [T1]
+```
+
+### 4. Check your own drawings
+
+Put the path in quotes, which is needed whenever it contains spaces:
+
+```powershell
+uv run dwgcheck "C:\Users\you\Documents\Drawings\plan.dwg"     # one file
+uv run dwgcheck "C:\Users\you\Documents\Drawings"              # all .dwg files in a folder
+uv run dwgcheck "C:\Users\you\Documents\Drawings" -r           # ... and all its subfolders
+```
+
+Tip: in File Explorer, hold Shift, right-click a file or folder and choose **Copy as path**, then
+paste it after `uv run dwgcheck`. It's already quoted.
+
+The result is on screen: `OK`, `INVALID` (followed by what is wrong) or `UNSUPPORTED` (a DWG
+version dwgcheck doesn't validate). For scripts, `echo $LASTEXITCODE` right after a run prints the
+[exit code](#exit-codes).
+
+### 5. Optional: install the ODA File Converter for deep checks
+
+`--deep` also has the ODA File Converter read each whole drawing. It's free:
+
+1. Open <https://www.opendesign.com/guestfiles/oda_file_converter> and download the **Windows**
+   version (a file ending in `.msi`, for example `ODAFileConverter_QT6_vc16_amd64dll.msi`).
+2. Double-click the downloaded file and click through the installer with the default options. If
+   Windows SmartScreen warns about the file, choose **More info**, then **Run anyway**.
+3. Check that dwgcheck finds it:
+
+   ```powershell
+   uv run dwgcheck fixtures -r --deep
+   ```
+
+   Every line should now end in `[T1+T2]`. Expect this to take a few seconds per file. The
+   converter's window may flash up for each drawing; leave it alone, it closes by itself.
+
+If you see `ODA File Converter not found`, the installer used a folder dwgcheck doesn't look in
+(it looks in `C:\Program Files\ODA\ODAFileConverter*\`). Find the program and tell dwgcheck where
+it is:
+
+```powershell
+Get-ChildItem "C:\Program Files", "C:\Program Files (x86)" -Recurse -Filter ODAFileConverter.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+```
+
+Put the path it prints between the quotes of this command, in place of the example path:
+
+```powershell
+setx DWGCHECK_ODAFC "C:\Program Files\ODA\ODAFileConverter 27.9.0\ODAFileConverter.exe"
+```
+
+Then close PowerShell, open a new one, `cd $HOME\dwg-verifier`, and run the `--deep` check again.
+
+### 6. Optional: run the tests
+
+```powershell
+uv run pytest
+```
+
+It should end with `passed`. The Tier 2 tests show as `skipped` if the ODA File Converter isn't
+installed.
+
+### 7. Update to a newer version later
+
+```powershell
+cd $HOME\dwg-verifier
+git pull
+uv sync --extra deep
+```
+
+### Windows troubleshooting
+
+| You see | Do this |
+|---|---|
+| `uv` or `git` "is not recognized as the name of a cmdlet" | Close PowerShell and open a new one. If it persists, rerun step 1. |
+| `winget` "is not recognized" | Install Git from <https://git-scm.com/download/win> with the default options, then continue with the uv line of step 1. |
+| `running scripts is disabled on this system` | You tried activating `.venv`. You don't need to: use `uv run dwgcheck ...` as shown. |
+| `error: Failed to spawn: dwgcheck` | You're not in the project folder. Run `cd $HOME\dwg-verifier` first. |
+| `no such file or directory` for your drawing | Check the path, and put it in quotes. |
+| `ODA File Converter not found` | Follow the end of step 5 to set `DWGCHECK_ODAFC`. |
+| `DWGCHECK_ODAFC=... does not point to a file` | The saved path is wrong. Repeat the `Get-ChildItem` and `setx` commands from step 5. |
 
 ## Usage
 
@@ -305,8 +436,8 @@ What the misses are:
 - **Unsupported inputs**: password-encrypted drawings, and every version other than the three
   above, including AC1018 (2004), which uses the same container.
 - **Tier 2 has only been verified on macOS (arm64)** with ODA File Converter 27.9. The Linux
-  (`xvfb-run`) and Windows paths follow ODA's documented layout but are untested; on Windows a
-  console window may appear for each file.
+  (`xvfb-run`) and Windows paths follow ODA's documented layout but are untested, and so is the
+  Windows guide above. On Windows the converter's window may appear briefly for each file.
 - Files are read fully into memory.
 
 ## Fixtures

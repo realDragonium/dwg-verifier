@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+dist/
+# Your own DWG files; tests pick them up when present.
+fixtures/local/*
+!fixtures/local/.gitkeep
+# Locally unpacked ODA File Converter (not redistributable).
+.tools/

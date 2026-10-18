@@ -16,6 +16,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,9 +113,7 @@ def check_file(path: Path, converter: Converter) -> list[Finding]:
         shutil.copyfile(path, in_dir / "input.dwg")
         args = [*converter.command, str(in_dir), str(out_dir), "ACAD2018", "DXF", "0", "1", "*.DWG"]
         try:
-            proc = subprocess.run(
-                args, capture_output=True, text=True, timeout=CONVERT_TIMEOUT_S, check=False, env=converter.env
-            )
+            proc = _run(args, converter.env)
         except subprocess.TimeoutExpired:
             return [_finding(ODA, "T2.oda.convert", f"did not finish within {CONVERT_TIMEOUT_S}s")]
         except OSError as exc:
@@ -135,6 +134,25 @@ def check_file(path: Path, converter: Converter) -> list[Finding]:
             return findings
         findings.extend(_audit_dxf(dxf))
         return findings
+
+
+def _run(args: list[str], env: dict[str, str] | None) -> subprocess.CompletedProcess[str]:
+    if sys.platform == "win32":
+        # The converter is a GUI app; this keeps its window hidden for every
+        # file, the same way ezdxf's odafc add-on does.
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        return subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=CONVERT_TIMEOUT_S,
+            check=False,
+            env=env,
+            startupinfo=startupinfo,
+        )
+    return subprocess.run(args, capture_output=True, text=True, timeout=CONVERT_TIMEOUT_S, check=False, env=env)
 
 
 def _audit_dxf(dxf: Path) -> list[Finding]:

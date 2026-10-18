@@ -218,7 +218,7 @@ version dwgcheck doesn't validate). For scripts, `echo $LASTEXITCODE` right afte
    ```
 
    Every line should now end in `[T1+T2]`. Expect this to take a few seconds per file. The
-   converter's window may flash up for each drawing; leave it alone, it closes by itself.
+   converter runs hidden in the background; no window should appear.
 
 If you see `ODA File Converter not found`, the installer used a folder dwgcheck doesn't look in
 (it looks in `C:\Program Files\ODA\ODAFileConverter*\`). Find the program and tell dwgcheck where
@@ -437,7 +437,8 @@ What the misses are:
   above, including AC1018 (2004), which uses the same container.
 - **Tier 2 has only been verified on macOS (arm64)** with ODA File Converter 27.9. The Linux
   (`xvfb-run`) and Windows paths follow ODA's documented layout but are untested, and so is the
-  Windows guide above. On Windows the converter's window may appear briefly for each file.
+  Windows guide above. On Windows the converter is started with its window hidden, the way
+  ezdxf's `odafc` add-on does it; that path is type-checked but has not run on Windows.
 - Files are read fully into memory.
 
 ## Fixtures

@@ -32,4 +32,5 @@ follow_untyped_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = ["deep: needs the ODA File Converter (Tier 2)"]

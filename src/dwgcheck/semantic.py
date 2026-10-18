@@ -3,6 +3,11 @@
 ezdxf.addons.odafc.convert() accepts audit=True but discards the converter's
 .err report (and may even move the .err file in place of the DXF), so the
 converter is invoked directly.
+
+The converter's CLI does not print what its audit repaired: with audit on it
+repairs silently, and only exceptions (read, audit or write failures) reach
+the per-file .err report. Every .err entry is therefore a finding, but an ODA
+"fix count" is not observable.
 """
 
 from __future__ import annotations
@@ -76,8 +81,12 @@ def find_converter() -> Converter:
     return Converter((exe,))
 
 
-def _finding(check: str, message: str) -> Finding:
-    return Finding(tier=2, check=check, message=message, section="DXF export")
+ODA = "ODA File Converter"
+EZDXF = "ezdxf auditor"
+
+
+def _finding(source: str, check: str, message: str) -> Finding:
+    return Finding(tier=2, check=check, message=message, section=source)
 
 
 def check_file(path: Path, converter: Converter) -> list[Finding]:
@@ -93,18 +102,22 @@ def check_file(path: Path, converter: Converter) -> list[Finding]:
         try:
             proc = subprocess.run(args, capture_output=True, text=True, timeout=CONVERT_TIMEOUT_S, check=False)
         except subprocess.TimeoutExpired:
-            return [_finding("T2.oda.convert", f"ODA File Converter did not finish within {CONVERT_TIMEOUT_S}s")]
+            return [_finding(ODA, "T2.oda.convert", f"did not finish within {CONVERT_TIMEOUT_S}s")]
         except OSError as exc:
             raise EnvironmentProblem(f"could not run ODA File Converter: {exc}") from exc
 
+        copy = in_dir / "input.dwg"
         findings: list[Finding] = []
         for err_file in sorted(out_dir.glob("*.err")):
-            text = err_file.read_text(errors="replace").strip()
-            findings.append(_finding("T2.oda.audit", f"ODA reported: {_one_line(text)}"))
+            text = err_file.read_text(errors="replace")
+            for alias in {str(copy), str(copy.resolve())}:
+                text = text.replace(alias, str(path))
+            findings.append(_finding(ODA, "T2.oda.error", _one_line(text)))
         dxf = out_dir / "input.dxf"
         if not dxf.is_file():
-            detail = _one_line(proc.stderr) or f"exit code {proc.returncode}"
-            findings.append(_finding("T2.oda.convert", f"conversion to DXF failed ({detail})"))
+            if not findings:
+                detail = _one_line(proc.stderr) or f"exit code {proc.returncode}"
+                findings.append(_finding(ODA, "T2.oda.convert", f"no DXF produced ({detail})"))
             return findings
         findings.extend(_audit_dxf(dxf))
         return findings
@@ -117,14 +130,14 @@ def _audit_dxf(dxf: Path) -> list[Finding]:
     try:
         _doc, auditor = recover.readfile(dxf)
     except (DXFStructureError, OSError, UnicodeDecodeError) as exc:
-        return [_finding("T2.ezdxf.load", f"ezdxf could not load the converted DXF: {exc}")]
+        return [_finding(EZDXF, "T2.ezdxf.load", f"could not load the converted DXF: {exc}")]
     findings: list[Finding] = []
     for kind, entries in (("errors", auditor.errors), ("fixes", auditor.fixes)):
         if not entries:
             continue
         sample = "; ".join(e.message for e in entries[:MAX_REPORTED_MESSAGES])
         more = f" (+{len(entries) - MAX_REPORTED_MESSAGES} more)" if len(entries) > MAX_REPORTED_MESSAGES else ""
-        findings.append(_finding(f"T2.ezdxf.{kind}", f"ezdxf auditor {kind}: {len(entries)}: {sample}{more}"))
+        findings.append(_finding(EZDXF, f"T2.ezdxf.{kind}", f"{len(entries)} {kind}: {sample}{more}"))
     return findings
 
 

@@ -299,6 +299,8 @@ def _check_data_page(
     data: bytes, section: SectionInfo, ref: PageRef, entry: PageEntry, name: str
 ) -> Finding | None:
     address = entry.address
+    if entry.size < r2004.DATA_PAGE_HEADER_SIZE:
+        return _finding("T1.page.header", f"page {ref.number} size 0x{entry.size:x} is smaller than its header", address, name)
     if address + entry.size > len(data):
         return _finding(
             "T1.page.bounds",
@@ -373,3 +375,20 @@ def _check_data_page(
             name,
         )
     return None
+
+
+@dataclass(frozen=True)
+class Layout:
+    header: FileHeader
+    pages: list[PageEntry]
+    sections: list[SectionInfo]
+
+
+def read_layout(data: bytes) -> Layout:
+    """Container layout of a file whose file header and maps are intact."""
+    try:
+        header = _check_file_header(data, [])
+        pages = _load_page_map(data, header)
+        return Layout(header, pages, _load_section_map(data, header, pages))
+    except _Fatal as fatal:
+        raise ValueError(fatal.finding.message) from fatal

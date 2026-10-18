@@ -23,6 +23,11 @@ DATA_PAGE_MASK = 0x4164536B
 PAGE_ALIGNMENT = 0x20
 
 
+# One 0x00 byte in a Long Compression Offset adds 0xFF output bytes, so no
+# valid stream expands by more than ~255x; 1024x leaves ample headroom.
+MAX_EXPANSION = 0x400
+
+
 class DecompressError(Exception):
     def __init__(self, message: str, offset: int) -> None:
         super().__init__(message)
@@ -75,11 +80,14 @@ def unmask_data_page_header(raw: bytes, address: int) -> bytes:
 def decompress(src: bytes | memoryview, expected_size: int) -> bytes:
     """Spec 4.7 LZ77 variant. Raises DecompressError on any malformed input.
 
-    Never produces more than expected_size bytes, so corrupt length fields
-    cannot make it allocate unbounded memory.
+    Never produces more than expected_size bytes, and rejects sizes the
+    input could not possibly expand to, so corrupt length fields cannot make
+    it allocate unbounded memory.
     """
     data = memoryview(src)
     end = len(data)
+    if expected_size > MAX_EXPANSION * end + 0x100:
+        raise DecompressError(f"declared size 0x{expected_size:x} is impossible for {end} compressed bytes", 0)
     out = bytearray()
     pos = 0
 
@@ -165,10 +173,12 @@ def decompress(src: bytes | memoryview, expected_size: int) -> bytes:
         if len(out) + comp_bytes > expected_size:
             raise DecompressError("output exceeds declared decompressed size", op_pos)
         start = len(out) - distance
-        if comp_bytes <= distance:
-            out.extend(out[start : start + comp_bytes])
-        else:
-            for i in range(comp_bytes):
-                out.append(out[start + i])
+        remaining = comp_bytes
+        # Overlapping copies (length > distance) repeat the window; copying in
+        # growing chunks keeps that linear instead of byte-by-byte.
+        while remaining:
+            chunk = out[start : start + min(remaining, len(out) - start)]
+            out.extend(chunk)
+            remaining -= len(chunk)
         copy_literal(lit)
     return bytes(out)

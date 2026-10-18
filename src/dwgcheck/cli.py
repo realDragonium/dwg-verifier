@@ -21,7 +21,10 @@ def check_path(path: Path, converter: semantic.Converter | None) -> FileReport:
         data = path.read_bytes()
     except OSError as exc:
         return FileReport(str(path), Status.ERROR, note=f"cannot read file: {exc.strerror or exc}")
-    tier1 = structural.check_bytes(data)
+    try:
+        tier1 = structural.check_bytes(data)
+    except Exception as exc:  # a parser bug must not hide behind a traceback or a verdict
+        return FileReport(str(path), Status.ERROR, note=f"internal error in Tier 1: {type(exc).__name__}: {exc}")
     if tier1.unsupported is not None:
         return FileReport(str(path), Status.UNSUPPORTED, version=tier1.version, note=tier1.unsupported)
     report = FileReport(str(path), Status.VALID, version=tier1.version, findings=list(tier1.findings), tiers_run=[1])
@@ -51,16 +54,22 @@ def exit_code(reports: Iterable[FileReport]) -> int:
     return EXIT_VALID
 
 
+def _printable(text: str) -> str:
+    """Escape control characters: names, versions and tool messages come from the file."""
+    return "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in text)
+
+
 def format_human(report: FileReport) -> str:
-    version = f" ({report.version})" if report.version else ""
+    file = _printable(report.file)
+    version = f" ({_printable(report.version)})" if report.version else ""
     if report.status is Status.VALID:
         tiers = "+".join(f"T{t}" for t in report.tiers_run)
-        return f"OK       {report.file}{version} [{tiers}]"
+        return f"OK       {file}{version} [{tiers}]"
     if report.status is not Status.INVALID:
-        return f"{report.status.value.upper():<8} {report.file}{version}: {report.note}"
-    lines = [f"INVALID  {report.file}{version}: {len(report.findings)} finding(s)"]
+        return f"{report.status.value.upper():<8} {file}{version}: {_printable(report.note or '')}"
+    lines = [f"INVALID  {file}{version}: {len(report.findings)} finding(s)"]
     for f in report.findings:
-        lines.append(f"  [T{f.tier}] {f.check} @ {f.location()}: {f.message}")
+        lines.append(f"  [T{f.tier}] {f.check} @ {_printable(f.location())}: {_printable(f.message)}")
     return "\n".join(lines)
 
 
